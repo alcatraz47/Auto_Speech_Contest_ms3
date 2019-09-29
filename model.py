@@ -9,6 +9,9 @@ from tensorflow.python.keras.layers import Dense,Dropout,Activation,Flatten,Conv
 from tensorflow.python.keras.layers import MaxPooling2D,BatchNormalization
 from tensorflow.python.keras.preprocessing import sequence
 
+from tensorflow.python.keras.regularizers import l2
+# from tensorflow.python.keras.callbacks import ReduceLROnPlateau
+
 from keras.backend.tensorflow_backend import set_session
 
 config = tf.ConfigProto()
@@ -20,12 +23,26 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 
 
 def extract_mfcc(data,sr=16000):
-    results = []
-    for d in data:
-        r = librosa.feature.mfcc(d,sr=16000,n_mfcc=24)
-        r = r.transpose()
-        results.append(r)
-    return results
+    # results = []
+    # for d in data:
+    #     r = librosa.feature.mfcc(d,sr=16000,n_mfcc=24)
+    #     r = r.transpose()
+    #     results.append(r)
+    # return results
+    #arfan 27-09-19
+    train_data, val_data, train_label, val_label = [], [], [], []
+    counter = 1
+    for d,l in data:
+    	r = librosa.feature.melspectrogram(d,sr=16000,n_mels=32).transpose()
+    	if counter > 2:
+    		val_data.append(r)
+    		val_label.append(l)
+    		counter = 1
+    		continue
+    	train_data.append(r)
+    	train_label.append(l)
+    	counter += 1
+    return train_data, val_data, train_label, val_label
 
 def pad_seq(data,pad_len):
     return sequence.pad_sequences(data,maxlen=pad_len,dtype='float32',padding='post')
@@ -36,25 +53,32 @@ def ohe2cat(label):
 
 def cnn_model(input_shape,num_class,max_layer_num=5):
         model = Sequential()
-        min_size = min(input_shape[:2])
-        for i in range(max_layer_num):
-            if i == 0:
-                model.add(Conv2D(64,3,input_shape = input_shape,padding='same'))
-            else:
-                model.add(Conv2D(64,3,padding='same'))
-            model.add(Activation('relu'))
-            model.add(BatchNormalization())
-            model.add(MaxPooling2D(pool_size=(2,2)))
-            min_size //= 2
-            if min_size < 2:
-                break
-                
+        model.add(Conv2D(5, (1,1), activation = 'relu', strides=(1,1), padding ='same', input_shape = input_shape))#, kernel_regularizer = l2(0.001)
+        model.add(Conv2D(10, (3,3), activation = 'relu', strides=(1,1), kernel_regularizer = l2(0.001)))#
+        model.add(Conv2D(15, (3,3), activation = 'relu', strides=(1,1), kernel_regularizer = l2(0.001)))#
+        model.add(Conv2D(20, (3,3), activation = 'relu', strides=(1,1), kernel_regularizer = l2(0.001)))#
+        model.add(Dropout(0.3))
         model.add(Flatten())
-        model.add(Dense(64))
-        model.add(Dropout(rate=0.5))
-        model.add(Activation('relu'))
-        model.add(Dense(num_class))
-        model.add(Activation('softmax'))
+        model.add(Dense(num_class, activation = 'softmax'))
+        # min_size = min(input_shape[:2])
+        # for i in range(max_layer_num):
+        #     if i == 0:
+        #         model.add(Conv2D(64,3,input_shape = input_shape,padding='same'))
+        #     else:
+        #         model.add(Conv2D(64,3,padding='same'))
+        #     model.add(Activation('relu'))
+        #     model.add(BatchNormalization())
+        #     model.add(MaxPooling2D(pool_size=(2,2)))
+        #     min_size //= 2
+        #     if min_size < 2:
+        #         break
+                
+        # model.add(Flatten())
+        # model.add(Dense(64))
+        # model.add(Dropout(rate=0.5))
+        # model.add(Activation('relu'))
+        # model.add(Dense(num_class))
+        # model.add(Activation('softmax'))
 
         return model
                 
@@ -89,15 +113,21 @@ class Model(object):
             return
         train_x, train_y = train_dataset
         train_x, train_y = shuffle(train_x, train_y)
+        #arfan 28-09-19
+        main_data = zip(train_x, train_y)
 
         #extract train feature
-        fea_x = extract_mfcc(train_x)
-        max_len = max([len(_) for _ in fea_x])
-        fea_x = pad_seq(fea_x, max_len)
+        #arfan 28-09-19
+        train_data, val_data, train_label, val_label = extract_mfcc(main_data)#train_x
+        max_len = max([len(_) for _ in train_data])
+        fea_x = pad_seq(train_data, max_len)#fea_x
+        fea_x_val = pad_seq(val_data, max_len)
 
         num_class = self.metadata['class_num']
         X=fea_x[:,:,:, np.newaxis]
-        y=train_y
+        X_val = fea_x_val[:,:,:, np.newaxis]
+        y=train_label
+        y_val = val_label
         
         model = cnn_model(X.shape[1:],num_class)
 
@@ -106,15 +136,16 @@ class Model(object):
                      optimizer = optimizer,
                      metrics= ['accuracy'])
         model.summary()
-        callbacks = [tf.keras.callbacks.EarlyStopping(
-                    monitor='val_loss', patience=10)]
+        # callbacks = [tf.keras.callbacks.EarlyStopping(
+        #             monitor='val_loss', patience=10)]
+        # callbacks = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.01)
+        #arfan 28-09-19
         history = model.fit(X,ohe2cat(y),
                     epochs=100,
-                    callbacks=callbacks,
-                    validation_split=0.1,
+                    validation_data=(X_val, ohe2cat(y_val)),
                     verbose=1,  # Logs once per epoch.
                     batch_size=32,
-                    shuffle=True)
+                    shuffle=True)#callbacks=callbacks,
 
         model.save(self.train_output_path + '/model.h5')
 
