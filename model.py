@@ -22,6 +22,9 @@ from keras.utils.np_utils import to_categorical
 from keras.callbacks import ReduceLROnPlateau
 
 from keras.backend.tensorflow_backend import set_session
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+mpl.use('Agg')
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
@@ -29,6 +32,29 @@ config.log_device_placement = True  # to log device placement (on which device t
                                     # (nothing gets printed in Jupyter, only if you run it standalone)
 sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
+
+def plot_model_history(model_history):
+    """
+    Plot Accuracy and Loss curves given the model_history
+    """
+    fig, axs = plt.subplots(1,2,figsize=(15,5))
+    # summarize history for accuracy
+    axs[0].plot(range(1,len(model_history.history['acc'])+1),model_history.history['acc'])
+    axs[0].plot(range(1,len(model_history.history['val_acc'])+1),model_history.history['val_acc'])
+    axs[0].set_title('Model Accuracy')
+    axs[0].set_ylabel('Accuracy')
+    axs[0].set_xlabel('Epoch')
+    axs[0].set_xticks(np.arange(1,len(model_history.history['acc'])+1),len(model_history.history['acc'])/10)
+    axs[0].legend(['train', 'val'], loc='best')
+    # summarize history for loss
+    axs[1].plot(range(1,len(model_history.history['loss'])+1),model_history.history['loss'])
+    axs[1].plot(range(1,len(model_history.history['val_loss'])+1),model_history.history['val_loss'])
+    axs[1].set_title('Model Loss')
+    axs[1].set_ylabel('Loss')
+    axs[1].set_xlabel('Epoch')
+    axs[1].set_xticks(np.arange(1,len(model_history.history['loss'])+1),len(model_history.history['loss'])/10)
+    axs[1].legend(['train', 'val'], loc='best')
+    fig.savefig('auto_speech_learning_curve.png')
 
 def extract_melspectrogram_train(data, sr=16000):
     X_train, X_val, y_train, y_val = [], [], [], []
@@ -128,6 +154,7 @@ def cnn_model(input_shape,num_class,max_layer_num=5):
         # model.add(Activation('relu'))
         # model.add(Dense(num_class))
         # model.add(Activation('softmax'))
+        
         model = Sequential()
         model.add(Conv2D(30, (3,3), input_shape = input_shape, padding = 'same'))
         model.add(Activation('relu'))
@@ -211,21 +238,23 @@ class Model(object):
         model = cnn_model(X_train.shape[1:],num_class)
 
         # optimizer = tf.keras.optimizers.SGD(lr=0.01,decay=1e-6)
-        optimizer = keras.optimizers.Adam(lr = 0.0001)
+        optimizer = keras.optimizers.Adam(lr = 0.00001)
         model.compile(loss = 'categorical_crossentropy',
                      optimizer = optimizer,
                      metrics= ['accuracy']) #sparse_
         model.summary()
         # callbacks = [tf.keras.callbacks.EarlyStopping(
         #             monitor='val_loss', patience=10)]
-        callbacks = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.0001)
+        callbacks = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.00001)
         history = model.fit(X_train,y_train,
-                    epochs=1000,
+                    epochs=500,
                     callbacks = [callbacks],
                     validation_data = (X_val, y_val),
                     verbose=1,  # Logs once per epoch.
                     batch_size=40, 
                     shuffle=True)#, shuffle=True, validation_split=0.1 #ohe2cat #callbacks=callbacks, validation_data = (X_val, y_val)
+
+        plot_model_history(history)
 
         model.save(self.train_output_path + '/model.h5')
 
