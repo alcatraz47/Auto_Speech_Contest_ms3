@@ -1,16 +1,25 @@
+import os
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import librosa
 from sklearn.utils import shuffle
 import json
 import tensorflow as tf
 import numpy as np
-from tensorflow.python.keras import models
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dense,Dropout,Activation,Flatten,Conv2D
-from tensorflow.python.keras.layers import MaxPooling2D,BatchNormalization
-from tensorflow.python.keras.preprocessing import sequence
+from sklearn.preprocessing import LabelEncoder
+import keras
+from keras import models
+from keras.models import Sequential
+from keras.layers import Dense,Dropout,Activation,Flatten,Conv2D
+from keras.layers import MaxPooling2D,BatchNormalization
+from keras.preprocessing import sequence
+# from tensorflow.python.keras import models
+# from tensorflow.python.keras.models import Sequential
+# from tensorflow.python.keras.layers import Dense,Dropout,Activation,Flatten,Conv2D
+# from tensorflow.python.keras.layers import MaxPooling2D,BatchNormalization
+# from tensorflow.python.keras.preprocessing import sequence
 
-from tensorflow.python.keras.regularizers import l2
-# from tensorflow.python.keras.callbacks import ReduceLROnPlateau
+from keras.utils.np_utils import to_categorical
+from keras.callbacks import ReduceLROnPlateau
 
 from keras.backend.tensorflow_backend import set_session
 
@@ -21,28 +30,75 @@ config.log_device_placement = True  # to log device placement (on which device t
 sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
-
-def extract_mfcc(data,sr=16000):
-    # results = []
-    # for d in data:
-    #     r = librosa.feature.mfcc(d,sr=16000,n_mfcc=24)
-    #     r = r.transpose()
-    #     results.append(r)
-    # return results
-    #arfan 27-09-19
-    train_data, val_data, train_label, val_label = [], [], [], []
+def extract_melspectrogram_train(data, sr=16000):
+    X_train, X_val, y_train, y_val = [], [], [], []
     counter = 1
-    for d,l in data:
-    	r = librosa.feature.melspectrogram(d,sr=16000,n_mels=32).transpose()
-    	if counter > 2:
-    		val_data.append(r)
-    		val_label.append(l)
-    		counter = 1
-    		continue
-    	train_data.append(r)
-    	train_label.append(l)
-    	counter += 1
-    return train_data, val_data, train_label, val_label
+    for feature, label in data:
+        melspectrogram = librosa.feature.melspectrogram(feature, sr = sr, n_mels = 40)#.transpose()
+        if(counter > 10):
+            X_val.append(melspectrogram)
+            y_val.append(label)
+            counter = 1
+            continue
+        X_train.append(melspectrogram)
+        y_train.append(label)
+        counter += 1
+
+    X_train = np.asarray(X_train)
+    X_val = np.asarray(X_val)
+    mean = np.mean(X_train)
+    std = np.std(X_train)
+    X_train_normalized = (X_train - mean) / std
+    X_val_normalized = (X_val - mean) / std
+
+    return X_train_normalized, X_val_normalized, y_train, y_val
+
+def extract_melspectrogram_test(data, sr = 16000):
+    results = []
+    for d in data:
+        r = librosa.feature.melspectrogram(d,sr=16000,n_mels=40)
+        results.append(r)
+    results = np.asarray(results)
+    print(results.shape)
+    return results
+
+# def convert_to_categorical(data):
+#     encoder = LabelEncoder()
+#     encoded_y = encoder.fit_transform(data)
+#     encoded_data = to_categorical(encoded_y)
+#     return encoded_data
+
+def extract_mfcc_train(data, sr = 16000):
+    X_train, X_val, y_train, y_val = [], [], [], []
+    counter = 1
+    for feature, label in data:
+        mfcc = librosa.feature.mfcc(feature, sr = sr, n_mfcc = 40)#.transpose()
+        if(counter > 10):
+            X_val.append(mfcc)
+            y_val.append(label)
+            counter = 1
+            continue
+        X_train.append(mfcc)
+        y_train.append(label)
+        counter += 1
+
+    X_train = np.asarray(X_train)
+    X_val = np.asarray(X_val)
+    mean = np.mean(X_train)
+    std = np.std(X_train)
+    X_train_normalized = (X_train - mean) / std
+    X_val_normalized = (X_val - mean) / std
+
+    return X_train_normalized, X_val_normalized, y_train, y_val
+
+def extract_mfcc_test(data,sr=16000):
+    results = []
+    for d in data:
+        r = librosa.feature.mfcc(d,sr=16000,n_mfcc=40)
+        # r = r.transpose()
+        results.append(r)
+    results = np.asarray(results)
+    return results
 
 def pad_seq(data,pad_len):
     return sequence.pad_sequences(data,maxlen=pad_len,dtype='float32',padding='post')
@@ -52,14 +108,7 @@ def ohe2cat(label):
     return np.argmax(label, axis=1)
 
 def cnn_model(input_shape,num_class,max_layer_num=5):
-        model = Sequential()
-        model.add(Conv2D(5, (1,1), activation = 'relu', strides=(1,1), padding ='same', input_shape = input_shape))#, kernel_regularizer = l2(0.001)
-        model.add(Conv2D(10, (3,3), activation = 'relu', strides=(1,1), kernel_regularizer = l2(0.001)))#
-        model.add(Conv2D(15, (3,3), activation = 'relu', strides=(1,1), kernel_regularizer = l2(0.001)))#
-        model.add(Conv2D(20, (3,3), activation = 'relu', strides=(1,1), kernel_regularizer = l2(0.001)))#
-        model.add(Dropout(0.3))
-        model.add(Flatten())
-        model.add(Dense(num_class, activation = 'softmax'))
+        # model = Sequential()
         # min_size = min(input_shape[:2])
         # for i in range(max_layer_num):
         #     if i == 0:
@@ -79,6 +128,26 @@ def cnn_model(input_shape,num_class,max_layer_num=5):
         # model.add(Activation('relu'))
         # model.add(Dense(num_class))
         # model.add(Activation('softmax'))
+        model = Sequential()
+        model.add(Conv2D(30, (3,3), input_shape = input_shape, padding = 'same'))
+        model.add(Activation('relu'))
+        model.add(BatchNormalization())
+
+        model.add(MaxPooling2D(2, 2))
+        model.add(Conv2D(25, (3,3)))
+        model.add(Activation('relu'))
+        model.add(BatchNormalization())
+        
+        model.add(MaxPooling2D(2, 2))
+        model.add(Conv2D(20, (3,3)))
+        model.add(Activation('relu'))
+        model.add(BatchNormalization())
+
+        model.add(MaxPooling2D(2, 2))
+        model.add(Flatten())
+        model.add(Dense(num_class))
+        model.add(Dropout(.2))
+        model.add(Activation('softmax'))
 
         return model
                 
@@ -113,39 +182,50 @@ class Model(object):
             return
         train_x, train_y = train_dataset
         train_x, train_y = shuffle(train_x, train_y)
-        #arfan 28-09-19
-        main_data = zip(train_x, train_y)
+        max_len = max([len(_) for _ in train_x])
+        train_x = pad_seq(train_x, max_len)
+
+        data = zip(train_x, train_y)
 
         #extract train feature
-        #arfan 28-09-19
-        train_data, val_data, train_label, val_label = extract_mfcc(main_data)#train_x
-        max_len = max([len(_) for _ in train_data])
-        fea_x = pad_seq(train_data, max_len)#fea_x
-        fea_x_val = pad_seq(val_data, max_len)
+        X_train, X_val, y_train, y_val = extract_mfcc_train(data)
+        # max_len = max([len(_) for _ in fea_x])
+        # fea_x = pad_seq(fea_x, max_len)
+        # X_train, X_val, y_train, y_val = extract_melspectrogram_train(data)
+        # X_val = pad_seq(X_val, max_len)
 
         num_class = self.metadata['class_num']
-        X=fea_x[:,:,:, np.newaxis]
-        X_val = fea_x_val[:,:,:, np.newaxis]
-        y=train_label
-        y_val = val_label
+        X_train = X_train[:,:,:, np. newaxis]
+        # print('-------------------------------------------------eikhane----------------------------')
+        # print(X_train.shape)
+        X_val = X_val[:,:,:, np.newaxis]
+        y_train = np.asarray(y_train)
+        # y_train = convert_to_categorical(y_train)
+        # print(y_train.shape)
         
-        model = cnn_model(X.shape[1:],num_class)
 
-        optimizer = tf.keras.optimizers.SGD(lr=0.01,decay=1e-6)
-        model.compile(loss = 'sparse_categorical_crossentropy',
+        y_val = np.asarray(y_val)
+        # y_val = convert_to_categorical(y_val)
+        print(y_val.shape)
+        
+        model = cnn_model(X_train.shape[1:],num_class)
+
+        # optimizer = tf.keras.optimizers.SGD(lr=0.01,decay=1e-6)
+        optimizer = keras.optimizers.Adam(lr = 0.0001)
+        model.compile(loss = 'categorical_crossentropy',
                      optimizer = optimizer,
-                     metrics= ['accuracy'])
+                     metrics= ['accuracy']) #sparse_
         model.summary()
         # callbacks = [tf.keras.callbacks.EarlyStopping(
         #             monitor='val_loss', patience=10)]
-        # callbacks = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.01)
-        #arfan 28-09-19
-        history = model.fit(X,ohe2cat(y),
-                    epochs=100,
-                    validation_data=(X_val, ohe2cat(y_val)),
+        callbacks = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.0001)
+        history = model.fit(X_train,y_train,
+                    epochs=1000,
+                    callbacks = [callbacks],
+                    validation_data = (X_val, y_val),
                     verbose=1,  # Logs once per epoch.
-                    batch_size=32,
-                    shuffle=True)#callbacks=callbacks,
+                    batch_size=40, 
+                    shuffle=True)#, shuffle=True, validation_split=0.1 #ohe2cat #callbacks=callbacks, validation_data = (X_val, y_val)
 
         model.save(self.train_output_path + '/model.h5')
 
@@ -170,9 +250,18 @@ class Model(object):
             f.close()
 
         #extract test feature
-        fea_x = extract_mfcc(test_x)
-        fea_x = pad_seq(fea_x, max_len)
-        test_x=fea_x[:,:,:, np.newaxis]
+        # fea_x = extract_mfcc(test_x)
+        # fea_x = pad_seq(fea_x, max_len)
+        # test_x=fea_x[:,:,:, np.newaxis]
+
+        # max_shape = max([len(_) for _ in test_x])
+        test_x = pad_seq(test_x, max_len)
+        # fea_x = extract_melspectrogram_test(test_x)
+        fea_x = extract_mfcc_test(test_x)
+        
+        test_x = fea_x[:,:,:, np.newaxis]
+
+
 
         #predict
         y_pred = model.predict_classes(test_x)
