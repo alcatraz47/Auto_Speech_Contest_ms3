@@ -3,13 +3,17 @@ from sklearn.utils import shuffle
 import json
 import tensorflow as tf
 import numpy as np
-from tensorflow.python.keras import models
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dense,Dropout,Activation,Flatten,Conv2D
-from tensorflow.python.keras.layers import MaxPooling2D,BatchNormalization
-from tensorflow.python.keras.preprocessing import sequence
+import keras
+from keras import models
+from keras.models import Sequential
+from keras.layers import Dense,Dropout,Activation,Flatten,Conv2D
+from keras.layers import MaxPooling2D,BatchNormalization
+from keras.preprocessing import sequence
 
 from keras.backend.tensorflow_backend import set_session
+
+
+from keras.callbacks import ReduceLROnPlateau
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
@@ -34,7 +38,8 @@ def pad_seq(data,pad_len):
 def ohe2cat(label):
     return np.argmax(label, axis=1)
 
-def cnn_model(input_shape,num_class,max_layer_num=5):
+def cnn_model(input_shape,num_class,max_layer_num=8):
+        print(input_shape)
         model = Sequential()
         min_size = min(input_shape[:2])
         for i in range(max_layer_num):
@@ -50,8 +55,11 @@ def cnn_model(input_shape,num_class,max_layer_num=5):
                 break
                 
         model.add(Flatten())
+        model.add(Dense(128))
+        model.add(Activation('relu'))
         model.add(Dense(64))
-        model.add(Dropout(rate=0.5))
+        model.add(Activation('relu'))
+        model.add(Dropout(rate=0.4))
         model.add(Activation('relu'))
         model.add(Dense(num_class))
         model.add(Activation('softmax'))
@@ -101,17 +109,18 @@ class Model(object):
         
         model = cnn_model(X.shape[1:],num_class)
 
-        optimizer = tf.keras.optimizers.SGD(lr=0.01,decay=1e-6)
+        #optimizer = tf.keras.optimizers.SGD(lr=0.01,decay=1e-6)
+        optimizer = keras.optimizers.Adam(lr = 0.0001)
         model.compile(loss = 'sparse_categorical_crossentropy',
                      optimizer = optimizer,
                      metrics= ['accuracy'])
         model.summary()
-        callbacks = [tf.keras.callbacks.EarlyStopping(
-                    monitor='val_loss', patience=10)]
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2,patience=10, min_lr=0.00001)
+
         history = model.fit(X,ohe2cat(y),
-                    epochs=100,
-                    callbacks=callbacks,
-                    validation_split=0.1,
+                    epochs=200,
+                    callbacks=[reduce_lr],
+                    validation_split=0.05,
                     verbose=1,  # Logs once per epoch.
                     batch_size=32,
                     shuffle=True)
