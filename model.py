@@ -3,10 +3,12 @@ from sklearn.utils import shuffle
 import json
 import tensorflow as tf
 import numpy as np
-from tensorflow.python.keras import models
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dense,Dropout,Activation,Flatten,Conv2D
-from tensorflow.python.keras.layers import MaxPooling2D,BatchNormalization
+import keras
+import time
+from keras import models
+from keras.models import *
+from keras.layers import *
+from keras.optimizers import *
 from tensorflow.python.keras.preprocessing import sequence
 
 from keras.backend.tensorflow_backend import set_session
@@ -22,7 +24,7 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 def extract_mfcc(data,sr=16000):
     results = []
     for d in data:
-        r = librosa.feature.mfcc(d,sr=16000,n_mfcc=24)
+        r = librosa.feature.mfcc(d,sr=sr,n_mfcc=24)
         r = r.transpose()
         results.append(r)
     return results
@@ -34,14 +36,14 @@ def pad_seq(data,pad_len):
 def ohe2cat(label):
     return np.argmax(label, axis=1)
 
-def cnn_model(input_shape,num_class,max_layer_num=5):
+def cnn_model(input_shape,num_class,max_layer_num=2):
         model = Sequential()
         min_size = min(input_shape[:2])
         for i in range(max_layer_num):
             if i == 0:
-                model.add(Conv2D(64,3,input_shape = input_shape,padding='same'))
+                model.add(Conv2D(64,3,input_shape = input_shape))
             else:
-                model.add(Conv2D(64,3,padding='same'))
+                model.add(Conv2D(32,3))
             model.add(Activation('relu'))
             model.add(BatchNormalization())
             model.add(MaxPooling2D(pool_size=(2,2)))
@@ -57,7 +59,16 @@ def cnn_model(input_shape,num_class,max_layer_num=5):
         model.add(Activation('softmax'))
 
         return model
-                
+
+def build_blstm(input_shape, num_class):
+    model = Sequential()
+    model.add(Bidirectional(LSTM(32, return_sequences = True), input_shape = input_shape))
+    model.add(LSTM(32, activation = 'relu'))
+    model.add(Dense(32, activation = 'relu'))
+    model.add(Flatten())
+    model.add(Dense(num_class, activation = 'softmax'))
+
+    return model
 
 class Model(object):
 
@@ -87,11 +98,12 @@ class Model(object):
         """
         if self.done_training:
             return
+        t1 = time.time()
         train_x, train_y = train_dataset
         train_x, train_y = shuffle(train_x, train_y)
 
         #extract train feature
-        fea_x = extract_mfcc(train_x)
+        fea_x = extract_mfcc(train_x, sr = 42000)
         max_len = max([len(_) for _ in fea_x])
         fea_x = pad_seq(fea_x, max_len)
 
@@ -100,21 +112,23 @@ class Model(object):
         y=train_y
         
         model = cnn_model(X.shape[1:],num_class)
+        # model = build_blstm(X.shape[1:], num_class)
 
-        optimizer = tf.keras.optimizers.SGD(lr=0.01,decay=1e-6)
-        model.compile(loss = 'sparse_categorical_crossentropy',
+        # optimizer = SGD(lr=0.01,decay=1e-6)
+        optimizer = Adam(lr=0.0001)
+        callbacks = [keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2,patience=5, min_lr=0.00001)]
+        model.compile(loss = 'categorical_crossentropy',
                      optimizer = optimizer,
                      metrics= ['accuracy'])
         model.summary()
-        callbacks = [tf.keras.callbacks.EarlyStopping(
-                    monitor='val_loss', patience=10)]
-        history = model.fit(X,ohe2cat(y),
-                    epochs=100,
-                    callbacks=callbacks,
-                    validation_split=0.1,
-                    verbose=1,  # Logs once per epoch.
-                    batch_size=32,
-                    shuffle=True)
+        # callbacks = [tf.keras.callbacks.EarlyStopping(
+        #             monitor='val_loss', patience=10)]
+
+        for epoch in range(100):
+            t2 = time.time()
+            if(round(t2 - t1) >= 1680):
+                break
+            history = model.fit(X,y, epochs=1, callbacks=callbacks, validation_split=0.1, verbose=1, batch_size=32, shuffle=True)
 
         model.save(self.train_output_path + '/model.h5')
 
@@ -139,7 +153,7 @@ class Model(object):
             f.close()
 
         #extract test feature
-        fea_x = extract_mfcc(test_x)
+        fea_x = extract_mfcc(test_x, 42000)
         fea_x = pad_seq(fea_x, max_len)
         test_x=fea_x[:,:,:, np.newaxis]
 
@@ -153,4 +167,3 @@ class Model(object):
             y_test[idx][y] = 1
 
         return y_test
-
